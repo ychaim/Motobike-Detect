@@ -14,6 +14,7 @@
 #include <math.h>
 
 #include <sstream>
+#include <iomanip>
 
 #define SSTR( x ) static_cast< std::ostringstream & >( \
         ( std::ostringstream() << std::dec << x ) ).str()
@@ -24,6 +25,8 @@ using namespace cv;
 struct Motorbike{
 	vector<Point> vec;
 	timeval start;
+	Rect roi;
+	Point center;
 	int id;
 };
 
@@ -31,11 +34,13 @@ int curIndex = 1;
 
 /** Function Headers */
 void detectAndDisplay(Mat frame);
+string toleadstr(int val, int length);
 
 /** Global variables */
 string root = "/media/DATA/OPENCV/";
 string videoFolder = root + "videos/";
 string dataFolder = root + "data/";
+string exportImgFolder = root + "/imgs/";
 
 String motor_cascade_name = dataFolder + "motor-v4.xml";
 CascadeClassifier motor_cascade;
@@ -53,6 +58,8 @@ int num_polygons = 1;
 int line_type = 8;
 
 int total = 0;
+
+int fileIndx = 0;
 
 VideoWriter outputVideo;
 
@@ -78,7 +85,12 @@ void drawPolyline(Mat frame) {
 int main(int argc, const char** argv) {
 	Mat frame;
 
-	string url = dataFolder + "DNG40_201710161517.mp4";
+	string url = dataFolder + "DNG13_20180328148.mp4";
+
+	if(argc > 1){
+		cout<<"Loading file : "<<argv[1]<<endl;
+		url = dataFolder + argv[1];
+	}
 
 	VideoCapture inputVideo(url);
 
@@ -120,13 +132,12 @@ int main(int argc, const char** argv) {
 			//-- 3. Apply the classifier to the frame
 			if (!frame.empty()) {
 				detectAndDisplay(frame);
-				Mat mask;
 			} else {
 				printf(" --(!) No captured frame -- Break!");
 				break;
 			}
 
-			int c = waitKey(25);
+			int c = waitKey(1);
 			if ((char) c == 'c') {
 				break;
 			}
@@ -135,23 +146,59 @@ int main(int argc, const char** argv) {
 	return 0;
 }
 
+int sizeA(int arr[]){
+	return sizeof(arr)/sizeof(arr[0]);
+}
+
 void drawVectors(Mat mat, int id){
 	timeval now;
 	gettimeofday(&now, NULL);
-	for(int i=0; i<listMotors.size(); i++){
-		float delta = ((now.tv_sec  - listMotors[i].start.tv_sec) * 1000000u +
-						now.tv_usec - listMotors[i].start.tv_usec) / 1.e6;
+
+	int ids[100];
+
+	int indx = 0;
+	int motorSize = listMotors.size();
+
+	//Remove motor not run
+	for(int i=0; i<motorSize; i++){
+		Motorbike currMotor = listMotors[i];
+		//Calculator delta time by second
+		float delta = ((now.tv_sec  - currMotor.start.tv_sec) * 1000000u +
+						now.tv_usec - currMotor.start.tv_usec) / 1.e6;
+		//If delta 2 second will be erase this motor
 		if(delta >= 2){
-			listMotors.erase(listMotors.begin() + i);
+			ids[indx] = currMotor.id;
+			indx++;
 		}
 	}
+
+	for(int j=motorSize-1; j>=0; j--){
+		Motorbike currMotor = listMotors[j];
+		for(int h=0; h<sizeA(ids); h++){
+			if(currMotor.id == ids[h]){
+				listMotors.erase(listMotors.begin() + j);
+				break;
+			}
+		}
+	}
+
 	for(int i=0; i<listMotors.size(); i++){
-		vector<Point> points = listMotors[i].vec;
+		//Check if current ID will put text and id
 		if(listMotors[i].id == id){
-			putText(mat, SSTR(listMotors[i].id), points[points.size() - 1], 2, 4,
-					Scalar(255, 255, 255), 2, 8, false);
+			vector<Point> points = listMotors[i].vec;
+			//do something here
+			string fileName = "img_" + toleadstr(id, 3) + "_" + toleadstr(fileIndx, 5) + ".jpg";
+			string filePath = exportImgFolder + fileName;
+			fileIndx++;
+
+			imwrite(filePath, mat(listMotors[i].roi));
+
+			putText(mat, SSTR(id), listMotors[i].center, 3, 0.7, Scalar(255, 255,255), 1,1,false);
+
 			for(int j = 0; j<points.size(); j++){
-				ellipse(mat, points[j], Size(10, 10), 360, 0, 0, Scalar(254, 123, 0), 2, 8, 0);
+				if(points.size() > 2 && j<points.size()-1){
+					line(mat, points[j], points[j+1], Scalar(5,201,15), 2, 8, 0);
+				}
 			}
 		}
 	}
@@ -177,24 +224,24 @@ void detectAndDisplay(Mat frame) {
 	//-- Detect motorbike
 	motor_cascade.detectMultiScale(frame_gray, motors, 1.1, 2, 0 | CV_HAAR_SCALE_IMAGE, Size(23, 50), Size(50, 108));
 
+	// loop foreach motor
 	for (size_t i = 0; i < motors.size(); i++) {
 		Point center(motors[i].x + 391 + motors[i].width / 2, motors[i].y + 303 + motors[i].height/2);
 
-		rectangle(
-				frame,
-				Point(motors[i].x + 391, motors[i].y + 303),
-				Point(motors[i].x + motors[i].width + 391,
-						motors[i].y + motors[i].height + 303),
-				Scalar(255, 0, 255), 2, 8, 0);
+		Rect findRoi(motors[i].x + 391, motors[i].y + 303, motors[i].width, motors[i].height);
+
 
 		Mat faceROI = frame_gray(motors[i]);
-		std::vector<Rect> eyes;
+
+		// add to list if list is empty
 		if(listMotors.empty()){
 			vector<Point> line;
 			Motorbike motor;
 			line.push_back(center);
 			motor.vec = line;
 			motor.id = curIndex;
+			motor.roi = findRoi;
+			motor.center = center;
 			if(curIndex > total){
 				total++;
 			}
@@ -204,6 +251,7 @@ void detectAndDisplay(Mat frame) {
 			drawVectors(frame, motor.id);
 		}else{
 			bool hasBefore = false;
+			//Check current motor is exists on list
 			for(int xx =0 ; xx < listMotors.size(); xx++){
 				vector<Point> line = listMotors[xx].vec;
 				if(!line.empty()){
@@ -212,17 +260,24 @@ void detectAndDisplay(Mat frame) {
 					int deltaY = abs(center.y - beforePoint.y);
 					if(deltaX < 20 && deltaY < 20){
 						hasBefore = true;
+						//Cap nhat lai center cua xe may
 						listMotors[xx].vec.push_back(center);
+						listMotors[xx].roi = findRoi;
+						listMotors[xx].center = center;
 						drawVectors(frame, listMotors[xx].id);
 						break;
 					}
 				}
 			}
+
+			//Truong hop khong ton tai xe truoc do trong list, thuc hien them xe moi
 			if(!hasBefore && firstFrameCondition.contains(center)){
 				vector<Point> line;
 				line.push_back(center);
 				Motorbike motor;
 				motor.vec = line;
+				motor.roi = findRoi;
+				motor.center = center;
 				motor.id = curIndex; curIndex++;
 				if(curIndex > total){
 					total++;
@@ -238,34 +293,49 @@ void detectAndDisplay(Mat frame) {
 
 	drawPolyline(frame);
 
-	putText(frame, "Make by Sac Le", Point(frame.cols - 200, 50), 1, 1,
-			Scalar(255, 255, 255), 2, 8, false);
-	putText(frame, "Make by Sac Le", Point(frame.cols - 200, 50), 1, 1,
-			Scalar(0, 0, 0), 1, 8, false);
+	//draw white matrix
+	//150x300
+	Mat backg( 100, 250, CV_8UC3, Scalar(255,255,255));
+	backg.copyTo(frame.rowRange(10, backg.rows+10).colRange(frame.cols-10-backg.cols, frame.cols-10));
 
-	string infoText = "found [";
-	string items = "] item(s)";
+	//50x100
+	Mat backg2(50, 150, CV_8UC3, Scalar(255,255,255));
+	backg2.copyTo(frame.rowRange(10, backg2.rows+10).colRange(10, backg2.cols+10));
+
+	Scalar black(0,0,0);
+
+	putText(frame, "Sac Le", Point(20, 45), 3, 1,
+				black, 2, 8, false);
+	putText(frame, "Dem xe may", Point(frame.cols - 240, 40), 3, 1,
+			black, 2, 8, false);
+	line(frame, Point(frame.cols - 240, 50), Point(frame.cols - 20, 50),
+			black, 2, 2, false);
+
+	string infoText = "Thay [";
+	string items = "] xe(s)";
 	string sizeMotor = SSTR(motors.size());
 
 	infoText = infoText + sizeMotor + items;
 
-	putText(frame, infoText.c_str(), Point(frame.cols - 200, 70), 1, 1,
-			Scalar(255, 255, 255), 4, 8, false);
-	putText(frame, infoText.c_str(), Point(frame.cols - 200, 70), 1, 1,
-			Scalar(0, 0, 0), 1, 8, false);
+	putText(frame, infoText.c_str(), Point(frame.cols - 200, 70), 3, 0.5,
+			black, 1, 8, false);
 
-	String countStr = "Count : ";
+	String countStr = "Tong so : ";
 	String totalStr = SSTR(total);
 
 	countStr = countStr + totalStr;
 
-	putText(frame, countStr.c_str(), Point(frame.cols - 200, 90), 1, 1,
-				Scalar(255, 255, 255), 4, 8, false);
-		putText(frame, countStr.c_str(), Point(frame.cols - 200, 90), 1, 1,
-				Scalar(0, 0, 0), 1, 8, false);
+	putText(frame, countStr.c_str(), Point(frame.cols - 200, 90), 3, 0.5,
+			black, 1, 8, false);
 
 
 	outputVideo << frame;
 	//-- Show what you got
 	imshow(window_name, frame);
+}
+
+string toleadstr(int val, int length){
+	stringstream ss;
+	ss << setw(length) << setfill('0') << val;
+	return ss.str();
 }
