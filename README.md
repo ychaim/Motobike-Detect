@@ -1,6 +1,6 @@
 # Motor counting
 ## structure : <br>
---- mainfile.cpp <br>
+|--- mainfile.cpp <br>
 |------ data <br>
 |--------- motor-v4.xml <br>
 
